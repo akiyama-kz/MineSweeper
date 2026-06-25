@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="shift-jis">
+    <title>マインスイーパ</title>
+    <style>
+        /* CSS: 見た目に関する設定 */
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        #game-board {
+            display: grid;
+            /* ここでグリッドの列数が設定される（例：4列） */
+            gap: 5px;
+            border: 3px solid #aaa;
+            background-color: #ccc;
+            padding: 10px;
+        }
+
+        .cell {
+            width: 40px; /* セルの幅 */
+            height: 40px; /* セルの高さ */
+            background-color: #b0c4de; /* 未クリック時の背景色（スカイブルー） */
+            border: 3px solid #555;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+            cursor: pointer;
+            user-select: none; /* テキスト選択防止 */
+        }
+
+        .cell[data-state="revealed"] {
+            background-color: #e6e6e6; /* 開いたセルの背景色 */
+            border: 1px solid #bbb;
+            cursor: default;
+            font-weight: bold;
+            color: black;
+        }
+
+        .cell[data-state="mine"] {
+            background-color: #ff4d4d; /* 爆弾の背景色 */
+            transform: scale(0.9); /* 少し小さく表示するなどの工夫も可能 */
+        }
+
+        /* 数字の色付け（マインスイーパの特徴）*/
+        .cell[data-value="1"] { color: blue; }
+        .cell[data-value="2"] { color: green; }
+        .cell[data-value="3"] { color: red; }
+        .cell[data-value="4"] { color: purple; }
+        .cell[data-value="5"] { color: brown; }
+        .cell[data-value="6"] { color: teal; }
+        .cell[data-value="7"] { color: black; }
+        .cell[data-value="8"] { color: gray; }
+
+        #controls {
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            gap: 30px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>? Minesweeper (マインスイーパ)</h1>
+
+    <div id="controls">
+        <div>残り時間: <span id="timer">0</span>秒</div>
+        <div>爆弾数: <span id="mines-count">10</span>個</div>
+    </div>
+
+    <div id="game-board">
+        <!-- ゲームボードのセルがJavaScriptによってここに生成されます -->
+    </div>
+
+    <button onclick="initGame()">ゲーム開始</button>
+
+    <script>
+        // ====================================================
+        // JavaScript: ゲームロジック部分
+        // ====================================================
+
+        const BOARD_SIZE = 10; // 縦のマス数
+        const COLS_SIZE = 10; // 横のマス数
+        const MINES_COUNT = 10; // 爆弾の数
+
+        let board = [];      // ゲーム状態全体を保持する配列（データ構造）
+        let gameActive = false; // ゲームが進行中か否か
+        let revealedCells = 0; // 開いたセルの枚数をカウント
+
+        const boardElement = document.getElementById('game-board');
+
+        /**
+         * ステップ1: ボードの初期化と爆弾配置
+         */
+        function setupBoard() {
+            // 空のボード配列を生成
+            board = [];
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                board[i] = [];
+                for (let j = 0; j < COLS_SIZE; j++) {
+                    board[i][j] = {
+                        mine: false, // このマスに爆弾があるか
+                        value: 0,    // 周囲の爆弾の数（1?8）
+                        revealed: false, // 開いているか
+                        isStart: (i === 0 && j === 0) // 開始地点フラグなど（任意）
+                    };
+                }
+            }
+
+            // 爆弾をランダムに配置
+            const mines = [];
+            while (mines.length < MINES_COUNT) {
+                const x = Math.floor(Math.random() * BOARD_SIZE);
+                const y = Math.floor(Math.random() * COLS_SIZE);
+                if (!board[x][y].mine) {
+                    board[x][y].mine = true;
+                    mines.push({ x, y });
+                }
+            }
+
+            // 周囲の爆弾数を計算し、初期値を設定
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                for (let j = 0; j < COLS_SIZE; j++) {
+                    if (!board[i][j].mine) {
+                        board[i][j].value = countNeighbors(i, j);
+                    }
+                }
+            }
+        }
+
+        /**
+         * 周囲のマスをチェックし、爆弾数をカウントする関数
+         */
+        function countNeighbors(x, y) {
+            let count = 0;
+            const offsets = [
+                [-1, -1], [-1, 0], [-1, 1], // 上の行
+                [0, -1],           [0, 1],  // 同じ行
+                [1, -1], [1, 0], [1, 1]    // 下の行
+            ];
+
+            for (const [dx, dy] of offsets) {
+                const newX = x + dx;
+                const newY = y + dy;
+
+                if (newX >= 0 && newX < BOARD_SIZE && newY >= 0 && newY < COLS_SIZE) {
+                    if (board[newX][newY].mine) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        /**
+         * ステップ2: HTML要素としてゲームボードをレンダリングする
+         */
+        function renderBoard() {
+            // boardElementの内容をクリア
+            boardElement.innerHTML = '';
+            boardElement.style.gridTemplateColumns = `repeat(${COLS_SIZE}, 1fr)`;
+
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                for (let j = 0; j < COLS_SIZE; j++) {
+                    const cellDiv = document.createElement('div');
+                    cellDiv.classList.add('cell');
+                    cellDiv.setAttribute('data-row', i);
+                    cellDiv.setAttribute('data-col', j);
+                    cellDiv.onclick = () => handleCellClick(i, j);
+
+                    // 初期レンダリング時は全て非表示状態にする
+                    if (board[i][j].mine) {
+                        cellDiv.innerHTML = ''; // 爆弾場所は初期空
+                    } else if (board[i][j].value > 0) {
+                        cellDiv.innerHTML = board[i][j].value;
+                        cellDiv.setAttribute('data-value', board[i][j].value);
+                    } else {
+                        // 周囲に爆弾がないマスは最初は空欄
+                        cellDiv.textContent = '';
+                    }
+
+                    boardElement.appendChild(cellDiv);
+                }
+            }
+        }
+
+
+        /**
+         * ステップ3: マスがクリックされたときの処理（メインのロジック）
+         */
+        function handleCellClick(row, col) {
+            if (!gameActive || board[row][col].revealed) return;
+
+            // 爆弾を踏んだ場合
+            if (board[row][col].mine) {
+                handleExplosion(row, col);
+                return;
+            }
+
+            // 安全なマスを開く処理（再帰呼び出し）
+            revealCellInternal(row, col);
+
+            // ゲームの勝敗判定
+            checkWinCondition();
+        }
+
+
+        /**
+         * セルを実際に開く処理と状態更新を行う関数（内部ロジック）
+         */
+        function revealCellInternal(x, y) {
+            // すでに開いている、または爆弾が設定されている場合は無視
+            if (board[x][y].revealed || board[x][y].mine) return;
+
+            // 状態を更新
+            board[x][y].revealed = true;
+            revealedCells++;
+
+            // UI（見た目）の更新
+            const cellElement = document.querySelector(`.cell[data-row="${x}"][data-col="${y}"]`);
+            if (cellElement) {
+                cellElement.setAttribute('data-state', 'revealed');
+                cellElement.onclick = null; // 再クリック不可に設定（処理を簡略化するため）
+
+                // 値の表示処理
+                if (board[x][y].value === 0) {
+                    // 周囲に爆弾がない場合、隣接するマスも再帰的に開く (これがコアロジック！)
+                    for (const [dx, dy] of getNeighborOffsets()) {
+                        const nextX = x + dx;
+                        const nextY = y + dy;
+
+                        if (nextX >= 0 && nextX < BOARD_SIZE && nextY >= 0 && nextY < COLS_SIZE) {
+                            // 同じ爆弾マスへの再帰呼び出しを防ぐため、隣接マスがまだ開いていないか確認
+                            if (!board[nextX][nextY].revealed) {
+                                revealCellInternal(nextX, nextY);
+                            }
+                        }
+                    }
+                } else {
+                    // 値を表示する（爆弾じゃない場合）
+                    cellElement.textContent = board[x][y].value;
+                    cellElement.setAttribute('data-value', board[x][y].value);
+                }
+            }
+        }
+
+        /**
+         * 爆発処理とゲームオーバーの表示を行う
+         */
+        function handleExplosion(row, col) {
+            gameActive = false;
+            document.getElementById('timer').textContent = "GAME OVER!";
+            alert("? BOOM! ?\n残念！爆弾を踏んでしまいました。");
+
+            // 全ての爆弾を表示する（デバッグ用）
+            revealAllMines();
+        }
+
+        /**
+         * 勝敗判定を行う
+         */
+        function checkWinCondition() {
+             // win条件: 開いた安全なマスの数が、(総マス数 - 爆弾数) に等しいか？
+            const safeRevealedCount = BOARD_SIZE * COLS_SIZE - MINES_COUNT;
+
+            if (revealedCells >= safeRevealedCount) {
+                gameActive = false;
+                alert("? おめでとうございます！すべてのマスを安全に開けました！?");
+                // 全て成功した場合、勝者を示す処理などを追加しても良い
+            }
+        }
+
+
+        /**
+         * ゲーム全体を初期化し直す関数
+         */
+        function initGame() {
+            setupBoard(); // 爆弾配置と値計算
+            renderBoard(); // UI描画
+            gameActive = true;
+            revealedCells = 0;
+
+            // タイマーリセットなどを行う
+            document.getElementById('timer').textContent = "0";
+        }
+
+
+        // ヘルパー関数群
+        function getNeighborOffsets() {
+             return [
+                [-1, -1], [-1, 0], [-1, 1],
+                [0, -1],           [0, 1],
+                [1, -1], [1, 0], [1, 1]
+            ];
+        }
+
+        function revealAllMines() {
+             for (let i = 0; i < BOARD_SIZE; i++) {
+                for (let j = 0; j < COLS_SIZE; j++) {
+                    const cellElement = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
+                    if (board[i][j].mine && !board[i][j].revealed) {
+                        // 爆弾部分を赤く目立つようにする（CSSに追加しても良い）
+                        cellElement.setAttribute('data-state', 'revealed'); // 強制開示
+                        cellElement.innerHTML = '?'; 
+                    }
+                }
+            }
+        }
+
+
+        // 初期ロード時にゲームボードの空の状態を表示しておく
+        document.addEventListener('DOMContentLoaded', () => {
+             console.log("Minesweeper loaded!");
+             // initGame(); // 自動スタートさせたい場合はコメントアウトを外す
+        });
+
+    </script>
+</body>
+</html>
